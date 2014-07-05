@@ -38,7 +38,7 @@ L.Label = L.Class.extend({
 	},
 
 	_isOnMarker: function () {
-		return this._source instanceof L.Marker;
+		return this._source instanceof L.Marker || this._source instanceof L.CircleMarker;
 	},
 
 	onAdd: function (map) {
@@ -60,6 +60,8 @@ L.Label = L.Class.extend({
 
 		map
 			.on('moveend', this._onMoveEnd, this)
+			.on('zoomstart', this._onZoomStart, this)
+			.on('zoomend', this._onZoomEnd, this)
 			.on('viewreset', this._onViewReset, this);
 
 		if (this._animated) {
@@ -76,6 +78,8 @@ L.Label = L.Class.extend({
 
 		map.off({
 			zoomanim: this._zoomAnimation,
+			zoomend: this._onZoomEnd,
+			zoomstart: this._onZoomStart,
 			moveend: this._onMoveEnd,
 			viewreset: this._onViewReset
 		}, this);
@@ -147,6 +151,11 @@ L.Label = L.Class.extend({
 		this._container.style.visibility = '';
 	},
 
+	_updateLabelDimensions: function () {
+		this._labelWidth = this._container.offsetWidth;
+		this._labelHeight = this._container.offsetHeight;
+	},
+
 	_updateContent: function () {
 		if (!this._content || !this._map || this._prevContent === this._content) {
 			return;
@@ -157,18 +166,18 @@ L.Label = L.Class.extend({
 
 			this._prevContent = this._content;
 
-			this._labelWidth = this._container.offsetWidth;
+			this._updateLabelDimensions();
 		}
 	},
 
 	_updatePosition: function () {
 		var pos = this._map.latLngToLayerPoint(this._latlng);
-
+		this._updateLabelDimensions();
 		this._setPosition(pos);
 	},
 
 	_getIconHeight: function () {
-		return this._source.options.icon ? this._source.options.icon.options.iconSize[1] : 0;
+		return this._source.options.icon ? this._source.options.icon.options.iconSize[1] : this._source.getRadius();
 	},
 
 	_setPosition: function (pos) {
@@ -181,23 +190,49 @@ L.Label = L.Class.extend({
 			offset = L.point(this.options.offset),
 			verticalOffset;
 
-		if (direction === 'top') {
-			verticalOffset = offset.y;
-			verticalOffset -= this._isOnMarker() ? this._getIconHeight() : 0;
+		var setDirections = {
+			top: function () {
+				direction = 'top';
+				verticalOffset = offset.y;
+				verticalOffset -= this._isOnMarker() ? this._getIconHeight() : 0;
+				verticalOffset -= this._labelHeight;
+				console.log('vertical offset top', verticalOffset, 'label height', this._labelHeight);
+				pos = pos.add(L.point(-labelWidth / 2, verticalOffset));
+			},
+			bottom: function () {
+				direction = 'bottom';
+				verticalOffset = offset.y;
+				verticalOffset += this._isOnMarker ? this._getIconHeight() : 0;
 
-			pos = pos.add(L.point(-labelWidth / 2, verticalOffset));
-		} else if (direction === 'bottom') {
-			verticalOffset = offset.y;
-			verticalOffset += this._isOnMarker ? this._getIconHeight() : 0;
-
-			pos = pos.add(L.point(-labelWidth / 2, verticalOffset));
-		} else if (direction === 'right' || direction === 'auto' && labelPoint.x < centerPoint.x) {
-			direction = 'right';
-			pos = pos.add(offset);
-		} else {
-			direction = 'left';
-			pos = pos.add(L.point(-offset.x - labelWidth, offset.y));
-		}
+				pos = pos.add(L.point(-labelWidth / 2, verticalOffset));
+			},
+			right: function () {
+				direction = 'right';
+				pos = pos.add(offset);
+			},
+			left: function () {
+				direction = 'left';
+				pos = pos.add(L.point(-offset.x - labelWidth, offset.y));
+			},
+			auto: function () {
+				if (labelPoint.x < centerPoint.x) {
+					setDirections.right.apply(this);
+				}
+				else {
+					setDirections.left.apply(this);
+				}
+			},
+			verticalauto: function () {
+				if (labelPoint.y > centerPoint.y) {
+					setDirections.top.apply(this);
+				}
+				else {
+					setDirections.bottom.apply(this);
+				}
+			}
+		};
+	
+		setDirections[direction].apply(this);
 
 		this._setProperClass(pos, direction);
 		L.DomUtil.setPosition(container, pos);
@@ -239,9 +274,22 @@ L.Label = L.Class.extend({
 	},
 
 	_onMoveEnd: function () {
-		if (!this._animated || this._getDirection() === 'auto') {
+		if (!this._animated || this._getDirection() === 'auto' || this._getDirection() === 'verticalauto') {
 			this._updatePosition();
 		}
+	},
+
+	_onZoomStart: function (e) {
+	
+	},
+
+	_onZoomEnd: function (e) {
+		this._lastZoomLevel = this._zoomLevel;
+		this._zoomLevel = e.target._zoom;
+
+		L.DomUtil.removeClass(this._map._container, 'zoom-level-' + this._lastZoomLevel);
+		L.DomUtil.addClass(this._map._container, 'zoom-level-' + this._zoomLevel);
+		this._onMoveEnd();
 	},
 
 	_onViewReset: function (e) {
