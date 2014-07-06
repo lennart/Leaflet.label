@@ -62,6 +62,7 @@ L.Label = L.Class.extend({
 			.on('moveend', this._onMoveEnd, this)
 			.on('zoomstart', this._onZoomStart, this)
 			.on('zoomend', this._onZoomEnd, this)
+			.on('layeradd', this._onMarkerAdd, this)
 			.on('viewreset', this._onViewReset, this);
 
 		if (this._animated) {
@@ -80,6 +81,7 @@ L.Label = L.Class.extend({
 			zoomanim: this._zoomAnimation,
 			zoomend: this._onZoomEnd,
 			zoomstart: this._onZoomStart,
+			layeradd: this._onMarkerAdd,
 			moveend: this._onMoveEnd,
 			viewreset: this._onViewReset
 		}, this);
@@ -172,8 +174,52 @@ L.Label = L.Class.extend({
 
 	_updatePosition: function () {
 		var pos = this._map.latLngToLayerPoint(this._latlng);
+
+		if (this._map._conflicts && !Object.keys(this._map._conflicts).length) {
+			this._conflictsRetries = 2;
+		}
+
 		this._updateLabelDimensions();
 		this._setPosition(pos);
+		this._updateLabelBounds();
+	},
+
+	_updateLabelBounds: function () {
+		if (this._map._labels) {
+			var keys = Object.keys(this._map._labels);
+
+			this._map._conflicts = {};
+
+			for (var i = keys.length - 1; i >= 0; i--) {
+				var label = this._map._labels[keys[i]];
+
+				var bounds = this._getLabelBounds(label);
+
+				for (var j = keys.length - 1; j >= 0; j--) {
+					var otherLabel = this._map._labels[keys[j]];
+
+					var otherBounds = this._getLabelBounds(otherLabel);
+
+					if (i !== j && bounds.intersects(otherBounds)) {
+						this._map._conflicts["" + keys[i] + ":" + keys[j]] = [keys[i], keys[j]];
+					}
+				}
+			}
+
+			if (Object.keys(this._map._conflicts).length) {
+				if (this._conflictsRetries > 0) {
+					this._updatePosition();
+				}
+			}
+		}
+	},
+
+	_getLabelBounds: function (label) {
+		var northEast = this._map.layerPointToLatLng(L.point(label._labelPos.x + label._labelWidth, label._labelPos.y + label._labelHeight)),
+		southWest = this._map.layerPointToLatLng(L.point(label._labelPos.x, label._labelPos.y));
+		var labelBounds = L.latLngBounds(southWest, northEast);
+		
+		return labelBounds;
 	},
 
 	_getIconHeight: function () {
@@ -188,6 +234,7 @@ L.Label = L.Class.extend({
 			direction = this._getDirection(),
 			labelWidth = this._labelWidth,
 			offset = L.point(this.options.offset),
+			id = this._leaflet_id,
 			verticalOffset;
 
 		var setDirections = {
@@ -196,7 +243,7 @@ L.Label = L.Class.extend({
 				verticalOffset = offset.y;
 				verticalOffset -= this._isOnMarker() ? this._getIconHeight() : 0;
 				verticalOffset -= this._labelHeight;
-				console.log('vertical offset top', verticalOffset, 'label height', this._labelHeight);
+				
 				pos = pos.add(L.point(-labelWidth / 2, verticalOffset));
 			},
 			bottom: function () {
@@ -223,11 +270,29 @@ L.Label = L.Class.extend({
 				}
 			},
 			verticalauto: function () {
+				var distanceToCenter = Math.abs(labelPoint.y - centerPoint.y),
+					threshold = 5,
+					conflicts = this._map._conflicts ? Object.keys(this._map._conflicts) : [],
+					ownConflicts = conflicts.filter(function (c) { return parseInt(c.split(":")[0], 10) === id; });
+
 				if (labelPoint.y > centerPoint.y) {
-					setDirections.top.apply(this);
+					if (ownConflicts.length) {
+						this._conflictsRetries--;
+						setDirections.bottom.apply(this);
+					}
+					else {
+						setDirections.top.apply(this);
+					}
+
 				}
 				else {
-					setDirections.bottom.apply(this);
+					if (ownConflicts.length) {
+						this._conflictsRetries--;
+						setDirections.top.apply(this);
+					}
+					else {
+						setDirections.bottom.apply(this);
+					}
 				}
 			}
 		};
@@ -235,6 +300,7 @@ L.Label = L.Class.extend({
 		setDirections[direction].apply(this);
 
 		this._setProperClass(pos, direction);
+		this._labelPos = pos;
 		L.DomUtil.setPosition(container, pos);
 	},
 
@@ -281,6 +347,19 @@ L.Label = L.Class.extend({
 
 	_onZoomStart: function (e) {
 	
+	},
+
+	_onMarkerAdd: function (e) {
+		if (e.layer instanceof L.Marker || e.layer instanceof L.CircleMarker) {
+			var otherLabel = e.layer.label;
+
+			this._map._labels = this._map._labels || {};
+
+			if (otherLabel._leaflet_id && otherLabel._labelPos) {
+				this._map._labels[otherLabel._leaflet_id] = otherLabel;
+			}
+		}
+
 	},
 
 	_onZoomEnd: function (e) {
