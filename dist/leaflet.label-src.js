@@ -175,43 +175,8 @@ L.Label = L.Class.extend({
 	_updatePosition: function () {
 		var pos = this._map.latLngToLayerPoint(this._latlng);
 
-		if (this._map._conflicts && !Object.keys(this._map._conflicts).length) {
-			this._conflictsRetries = 2;
-		}
-
 		this._updateLabelDimensions();
 		this._setPosition(pos);
-		this._updateLabelBounds();
-	},
-
-	_updateLabelBounds: function () {
-		if (this._map._labels) {
-			var keys = Object.keys(this._map._labels);
-
-			this._map._conflicts = {};
-
-			for (var i = keys.length - 1; i >= 0; i--) {
-				var label = this._map._labels[keys[i]];
-
-				var bounds = this._getLabelBounds(label);
-
-				for (var j = keys.length - 1; j >= 0; j--) {
-					var otherLabel = this._map._labels[keys[j]];
-
-					var otherBounds = this._getLabelBounds(otherLabel);
-
-					if (i !== j && bounds.intersects(otherBounds)) {
-						this._map._conflicts["" + keys[i] + ":" + keys[j]] = [keys[i], keys[j]];
-					}
-				}
-			}
-
-			if (Object.keys(this._map._conflicts).length) {
-				if (this._conflictsRetries > 0) {
-					this._updatePosition();
-				}
-			}
-		}
 	},
 
 	_getLabelBounds: function (label) {
@@ -270,29 +235,12 @@ L.Label = L.Class.extend({
 				}
 			},
 			verticalauto: function () {
-				var distanceToCenter = Math.abs(labelPoint.y - centerPoint.y),
-					threshold = 5,
-					conflicts = this._map._conflicts ? Object.keys(this._map._conflicts) : [],
-					ownConflicts = conflicts.filter(function (c) { return parseInt(c.split(":")[0], 10) === id; });
-
 				if (labelPoint.y > centerPoint.y) {
-					if (ownConflicts.length) {
-						this._conflictsRetries--;
-						setDirections.bottom.apply(this);
-					}
-					else {
-						setDirections.top.apply(this);
-					}
-
+					setDirections.top.apply(this);
+					
 				}
 				else {
-					if (ownConflicts.length) {
-						this._conflictsRetries--;
-						setDirections.top.apply(this);
-					}
-					else {
-						setDirections.bottom.apply(this);
-					}
+					setDirections.bottom.apply(this);
 				}
 			}
 		};
@@ -350,16 +298,7 @@ L.Label = L.Class.extend({
 	},
 
 	_onMarkerAdd: function (e) {
-		if (e.layer instanceof L.Marker || e.layer instanceof L.CircleMarker) {
-			var otherLabel = e.layer.label;
-
-			this._map._labels = this._map._labels || {};
-
-			if (otherLabel._leaflet_id && otherLabel._labelPos) {
-				this._map._labels[otherLabel._leaflet_id] = otherLabel;
-			}
-		}
-
+		
 	},
 
 	_onZoomEnd: function (e) {
